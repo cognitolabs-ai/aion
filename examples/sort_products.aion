@@ -1,0 +1,20 @@
+#intent
+# goal: "Sort active products by ascending price."
+# pre: "data == Array[ProductStruct]"
+# post: "return == Array[ProductStruct] where sorted by ?.price asc and ?.is_active==true"
+fn sort_active_by_price(data:Array[ProductStruct])->Array[ProductStruct]{
+  data|filter(?.is_active==true)|sort(a.price < b.price)
+}
+
+verify{
+  let items=[
+    ProductStruct{id:"c",is_active:true,price:100.0},
+    ProductStruct{id:"a",is_active:true,price:9.9},
+    ProductStruct{id:"b",is_active:false,price:1.0}
+  ]
+  let out = sort_active_by_price(items)
+  assert out.len()==2
+  assert out[0].id=="a"
+  assert out[1].id=="c"
+}
+

@@ -1,0 +1,21 @@
+#intent
+# goal: Fetch user profile data by user_id. If the user does not exist (404), return null safely.
+# pre: user_id == String
+# post: return == UserProfile? (Nullable struct)
+fn fetch_user_profile(user_id:String)->UserProfile?{
+  http.get("/api/users/${user_id}")|match{
+    200=>?.json() as UserProfile,
+    404=>null,
+    _=>throw APIError("Unexpected status: ${?.status}")
+  }
+
+  verify{
+    mock http.get("/api/users/ok")=>Response(200,"{\"id\":\"ok\"}")
+    mock http.get("/api/users/missing")=>Response(404)
+    mock http.get("/api/users/fail")=>Response(500)
+
+    assert fetch_user_profile("ok")!=null
+    assert fetch_user_profile("missing")==null
+    assert_throws(APIError){fetch_user_profile("fail")}
+  }
+}

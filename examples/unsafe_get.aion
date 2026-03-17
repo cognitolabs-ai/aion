@@ -1,0 +1,12 @@
+#intent
+# goal: "Return first element without null handling (should fail checker)."
+# pre: "data == Array[Int32]"
+# post: "return == Int32"
+fn first_no_check(data:Array[Int32])->Int32{
+  data.get(0)|map(?.+1)
+}
+
+verify{
+  assert true
+}
+

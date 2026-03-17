@@ -1,0 +1,16 @@
+#intent
+# goal: Filter a list of product records to find active items under a maximum price.
+# pre: data == Array[ProductStruct], max_price == Float64
+# post: return == Array[ProductStruct] where ?.is_active == true AND ?.price <= max_price
+fn filter_active_products(data:Array[ProductStruct],max_price:Float64)->Array[ProductStruct]{
+  data|filter(?.is_active==true)|filter(?.price<=max_price)
+}
+
+verify{
+  let items=[
+    ProductStruct{id:"a",is_active:true,price:9.9},
+    ProductStruct{id:"b",is_active:false,price:1.0},
+    ProductStruct{id:"c",is_active:true,price:100.0}
+  ]
+  assert filter_active_products(items,10.0).len()==1
+}

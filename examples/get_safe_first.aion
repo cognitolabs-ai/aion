@@ -1,0 +1,13 @@
+#intent
+# goal: "Return the first element safely or 0."
+# pre: "data == Array[Int32]"
+# post: "return == Int32"
+fn get_safe_first(data:Array[Int32])->Int32{
+  data.get(0)|match{ null=>0, val=>val }
+}
+
+verify{
+  assert get_safe_first([1,2,3]) == 1
+  assert get_safe_first([]) == 0
+}
+

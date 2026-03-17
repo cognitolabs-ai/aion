@@ -1,0 +1,15 @@
+#intent
+# goal: "Remove negatives, double, and sum values."
+# pre: "metrics == Array[Int32]"
+# post: "return == Int32"
+fn process_and_sum_metrics(metrics:Array[Int32])->Int32{
+  metrics|filter(?. >= 0)|map(?.* 2)|fold(0, acc + ?.)
+}
+
+verify{
+  assert process_and_sum_metrics([1,-5,3,0]) == 8
+  assert process_and_sum_metrics([-1,-2,-3]) == 0
+  assert process_and_sum_metrics([1]) == 2
+  assert process_and_sum_metrics([]) == 0
+}
+

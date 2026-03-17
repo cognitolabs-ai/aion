@@ -1,0 +1,8 @@
+// Standard struct definitions for examples and tests
+
+struct ProductStruct { id: String, is_active: Bool, price: Float64 }
+struct UserProfile { id: String }
+
+// HTTP-related standard types
+struct Response { status: Int32, body: String?, headers: Map[String,String]? }
+struct RequestOptions { headers: Map[String,String]?, body: infer?, timeout: Int32? }

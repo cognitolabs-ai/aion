@@ -1,0 +1,11 @@
+#intent
+# goal: "Group positive metrics by parity, then window sum by 3."
+# pre: "metrics == Array[Int32]"
+# post: "return == Array[Int32]"
+fn parity_window_sums(metrics:Array[Int32])->Array[Int32]{
+  metrics|filter(?.>0)|groupBy(it % 2)|pick(1)|window(3)|map(it[0] + it[1] + it[2])
+}
+
+verify{
+  assert parity_window_sums([1,2,3,4,5,6]) == [6, 15]
+}

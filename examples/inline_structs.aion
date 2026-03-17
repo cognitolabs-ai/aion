@@ -1,0 +1,15 @@
+struct Temp { v: Int32 }
+
+#intent
+# goal: "Map over inline-declared struct array and return values."
+# pre: "data == Array[Temp]"
+# post: "return == Array[Int32]"
+fn extract_values(data:Array[Temp])->Array[Int32]{
+  data|map(?.v)
+}
+
+verify{
+  let arr=[Temp{v:1},Temp{v:2},Temp{v:3}]
+  assert extract_values(arr) == [1,2,3]
+}
+

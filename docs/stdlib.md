@@ -56,7 +56,7 @@ fn process_and_sum_metrics(metrics: Array[Int32]) -> Int32 {
 verify {
     assert process_and_sum_metrics([1, -5, 3, 0]) == 8
     assert process_and_sum_metrics([-1, -2, -3]) == 0
-    assert process_and_sum_metrics([1]) == 20
+    assert process_and_sum_metrics([1]) == 2
     assert process_and_sum_metrics([]) == 0
 }
 5. Varno naslavljanje (Safe Indexing Example)
@@ -78,3 +78,13 @@ fn get_safe_first(data: Array[Int32]) -> Int32 {
 1. **Definicija `?.` operatorja**: Modeli v novih jezikih pogosto ne vedo, kako se sklicevati na anonimne elemente (v Pythonu bi to bil `lambda x: x`). Ta dokumentacija eksplicitno uÄi agenta, naj za to uporablja `?.`.
 2. **PrepreÄevanje Out-of-Bounds napak**: Z navedbo, da metodi `pop()` in `get()` vraÄata nullable tipe (`T?`), bo AI avtomatsko generiral `match` kodo in se s tem izognil najpogostejÅ¡i napaki pri delu z nizi, tj. indeksiranju izven obsega pomnilnika.
 3. **Odmik od t. i. imperativnosti**: Ker AI v Pythonu oboÅ¾uje zanke (npr. `for item in data`), ga BLUF in primeri opozarjajo, da je v Aionu edini in najhitrejÅ¡i naÄin za obdelavo podatkov z uporabo operatorjev cevovoda (`| map | filter`), kar omogoÄa prenos k MLIR strojni optimizaciji.
+
+## Dodatni cevovodni operatorji
+
+- sort(a.price < b.price) ali sort(it.price) – urejanje s primerjalnikom ali po kljuu.
+- groupBy(it % 2) – grupiranje elementov po kljuu.
+- window(size, step=1) – drseca okna nad podatki.
+- pick(key) – izbor skupine iz Map po kljudu.
+- educe(init, expr) – enakovredno old.
+- sum([expr]) – vsota elementov ali izraza nad elementi.
+
