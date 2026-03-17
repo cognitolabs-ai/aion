@@ -14,3 +14,4 @@ last-updated: 2026-03-17
 - `examples/aggregate.aion`: Sum prices of active products with `sum(?.price)`.
 - `examples/inline_structs.aion`: Inline `struct` declaration used in pipelines.
 - `examples/get_safe_first.aion`: Safe indexing via `match` on `data.get(0)`.
+- `examples/non_null_filter.aion`: Null-elimination via `filter(it != null)` followed by `fold`.

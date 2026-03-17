@@ -11,7 +11,7 @@ class TypeCheckError(Exception):
 
 
 class TypeChecker:
-    allowed_stages = {"filter", "map", "fold", "reduce", "sum", "sort", "match", "http.get", "groupBy", "window", "pick"}
+    allowed_stages = {"filter", "map", "fold", "reduce", "sum", "sort", "match", "http.get", "groupBy", "window", "pick", "distinct", "take", "drop", "flatten", "zip"}
 
     def __init__(self, fn: Function) -> None:
         self.fn = fn
@@ -27,8 +27,15 @@ class TypeChecker:
 
     def _check_pipeline(self) -> None:
         # Null-safety: if input expr uses `.get(`, demand immediate `match` stage
-        if '.get(' in self.fn.input_expr and (not self.fn.stages or self.fn.stages[0].name != 'match'):
-            raise TypeCheckError("nullable value from 'get(...)' must be handled by an immediate match stage")
+        if '.get(' in self.fn.input_expr:
+            if not self.fn.stages:
+                raise TypeCheckError("nullable value from 'get(...)' must be followed by a match or null-filter stage")
+            s0 = self.fn.stages[0]
+            if s0.name != 'match':
+                # Allow immediate filter that removes nulls
+                null_filter = ("!= null" in s0.arg) or ("is not null" in s0.arg)
+                if not (s0.name == 'filter' and null_filter):
+                    raise TypeCheckError("nullable value from 'get(...)' must be handled by an immediate match or filter != null")
 
         for idx, st in enumerate(self.fn.stages):
             if st.name not in self.allowed_stages:
@@ -77,6 +84,12 @@ class TypeChecker:
             if st.name == "pick":
                 if not st.arg:
                     raise TypeCheckError("pick requires a key expression, e.g., pick(1)")
+            if st.name in ("take", "drop"):
+                if not st.arg:
+                    raise TypeCheckError(f"{st.name} requires a numeric argument")
+            if st.name == "zip":
+                if not st.arg:
+                    raise TypeCheckError("zip requires another array expression, e.g., zip(other)")
             if st.name == "http.get":
                 # Require the next stage to be a match for exhaustive handling
                 if idx + 1 >= len(self.fn.stages) or self.fn.stages[idx + 1].name != 'match':

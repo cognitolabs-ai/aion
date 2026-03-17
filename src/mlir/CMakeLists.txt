@@ -42,4 +42,5 @@ add_mlir_library(AionLowering
   LowerToLinalg.cpp
   LINK_LIBS PUBLIC
     MLIRIR
-    MLIRLinalg)
+    MLIRLinalg
+    MLIRTensor)

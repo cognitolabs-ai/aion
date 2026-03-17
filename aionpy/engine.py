@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
+import json
 
 from .dot import DotDict, DotList, wrap
 from .parser import Function, Stage, VerifyStmt, parse_file
@@ -12,6 +13,7 @@ from .runtime import APIError, Response, http
 from .checker import TypeChecker, TypeCheckError
 from .nullflow import NullFlowChecker, NullFlowError
 from .typesys import REGISTRY, load_standard_types
+from .fql import FQLSpec
 
 
 def _to_py_expr(expr: str) -> str:
@@ -186,6 +188,7 @@ class Engine:
     def __init__(self, unit: Function) -> None:
         self.unit = unit
         self.env: Dict[str, Any] = {}
+        self._trace: List[Dict[str, Any]] = []
         # expose runtime
         self.env.update({
             'APIError': APIError,
@@ -203,9 +206,18 @@ class Engine:
         cur = wrap(cur)
         for st in self.unit.stages:
             cur = self._apply_stage(st, cur)
+        # Enforce FQL postcondition (if any)
+        err = FQLSpec.from_intent(self.unit.intent).check_post(cur)
+        if err:
+            raise AssertionError(f"FQL postcondition violation: {err}")
         return wrap(cur)
 
     def _apply_stage(self, st: Stage, cur: Any) -> Any:
+        # record trace entry (stage + snippet of arg)
+        try:
+            self._trace.append({"stage": st.name, "arg": st.arg})
+        except Exception:
+            pass
         if st.name == 'filter':
             assert isinstance(cur, (list, DotList)), "filter expects an array"
             out: List[Any] = []
@@ -310,6 +322,46 @@ class Engine:
             if isinstance(cur, dict):
                 return wrap(cur.get(key))
             return None
+        if st.name == 'distinct':
+            assert isinstance(cur, (list, DotList)), "distinct expects an array"
+            seen = set()
+            out: List[Any] = []
+            if st.arg:
+                for el in cur:
+                    key = _eval_expr(st.arg, {**self.env, 'it': wrap(el)})
+                    if key not in seen:
+                        seen.add(key)
+                        out.append(wrap(el))
+            else:
+                for el in cur:
+                    if el not in seen:
+                        seen.add(el)
+                        out.append(wrap(el))
+            return wrap(out)
+        if st.name == 'take':
+            assert isinstance(cur, (list, DotList)), "take expects an array"
+            n = int(_eval_expr(st.arg, self.env)) if st.arg else 0
+            return wrap(list(cur)[:n])
+        if st.name == 'drop':
+            assert isinstance(cur, (list, DotList)), "drop expects an array"
+            n = int(_eval_expr(st.arg, self.env)) if st.arg else 0
+            return wrap(list(cur)[n:])
+        if st.name == 'flatten':
+            assert isinstance(cur, (list, DotList)), "flatten expects an array"
+            out: List[Any] = []
+            for el in cur:
+                if isinstance(el, (list, DotList)):
+                    out.extend(list(el))
+                else:
+                    out.append(el)
+            return wrap(out)
+        if st.name == 'zip':
+            assert isinstance(cur, (list, DotList)), "zip expects an array"
+            other = _eval_expr(st.arg, self.env)
+            out = []
+            for a, b in zip(list(cur), list(other)):
+                out.append(wrap([wrap(a), wrap(b)]))
+            return wrap(out)
         if st.name == 'match':
             # arg format: pattern => expr, pattern => expr, ...
             arms = _split_top_level_commas(st.arg)
@@ -357,6 +409,7 @@ class Engine:
 
         self.env[self.unit.name] = _fn_proxy
 
+        spec = FQLSpec.from_intent(self.unit.intent)
         for stmt in self.unit.verify:
             if stmt.kind == 'mock':
                 # mock http.get("/path") => Response(200, "{...}")
@@ -383,6 +436,16 @@ class Engine:
                 res = _eval_expr(expr, self.env)
                 if not res:
                     raise AssertionError(f"assert failed: {expr}")
+                # If equality on function call, evaluate and check postcondition
+                m = re.match(rf"{self.unit.name}\\((.*)\\)\\s*==\\s*(.*)$", expr)
+                if m:
+                    args_src = m.group(1)
+                    parts = _split_args(args_src)
+                    args_vals = [ _eval_expr(a, self.env) for a in parts ]
+                    actual = self.env[self.unit.name](*args_vals)
+                    err = spec.check_post(actual)
+                    if err:
+                        raise AssertionError(f"FQL postcondition violation: {err}")
             elif stmt.kind == 'assert_throws':
                 # assert_throws(APIError) { call }
                 m = re.match(r"assert_throws\(([^)]+)\)\s*\{(.*)\}\s*", stmt.payload)
@@ -400,6 +463,15 @@ class Engine:
                     caught = e
                 if not isinstance(caught, expected):
                     raise AssertionError(f"expected {ex_name} but got {type(caught).__name__ if caught else 'no exception'}")
+        # Persist trace snapshot for assistant tooling
+        try:
+            traces_dir = Path('.aion') / 'traces'
+            traces_dir.mkdir(parents=True, exist_ok=True)
+            (traces_dir / f"{self.unit.name}_last.json").write_text(
+                json.dumps({"intent": self.unit.intent, "trace": self._trace}, indent=2),
+                encoding='utf-8')
+        except Exception:
+            pass
 
 
 def _split_args(arg_src: str) -> List[str]:

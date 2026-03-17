@@ -28,23 +28,28 @@ class NullFlowChecker:
         self.fn = fn
 
     def run(self) -> None:
-        st = FlowState()
-        # Start state: input may be null if it uses `.get(`
-        st.may_be_null = 'get(' in self.fn.input_expr
-        if st.may_be_null and (not self.fn.stages or self.fn.stages[0].name != 'match'):
-            raise NullFlowError("nullable input (from get(...)) must be handled by an immediate match stage")
+        st = FlowState(may_be_null=('get(' in self.fn.input_expr))
+        # Allow immediate filter removing nulls
+        if st.may_be_null and self.fn.stages:
+            s0 = self.fn.stages[0]
+            if s0.name == 'filter' and ("!= null" in s0.arg or "is not null" in s0.arg):
+                st.may_be_null = False
 
         for i, s in enumerate(self.fn.stages):
-            # If current value may be null, we require an immediate match
+            # If current value may be null, require match now
             if st.may_be_null and s.name != 'match':
                 raise NullFlowError(f"nullable value must be matched before stage '{s.name}'")
 
             # Update nullability based on this stage
             if s.name == 'match':
                 st.may_be_null = False
-            elif s.name in ('filter', 'map', 'fold', 'sort', 'groupBy', 'window', 'pick'):
+            elif s.name == 'filter':
+                # If filter removes nulls, future value is non-null
+                if ("!= null" in s.arg) or ("is not null" in s.arg):
+                    st.may_be_null = False
+                else:
+                    st.may_be_null = _expr_may_produce_null(s.arg)
+            elif s.name in ('map', 'fold', 'sort', 'groupBy', 'window', 'pick', 'distinct', 'take', 'drop', 'flatten', 'zip'):
                 st.may_be_null = _expr_may_produce_null(s.arg)
             elif s.name == 'http.get':
-                # http.get returns Response (non-null), but requires match for branches (enforced by TypeChecker)
                 st.may_be_null = False
-

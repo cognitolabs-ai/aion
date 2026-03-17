@@ -22,3 +22,12 @@ def test_golden_data_filter_ir():
     golden = Path('tests/cli/golden/data_filter.mlir').read_text(encoding='utf-8')
     assert _normalize(ir) == _normalize(golden)
 
+
+def test_golden_sort_ir():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aion_demo", str(Path('scripts/aion_demo.py').resolve()))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore
+    ir = mod.emit_mlir(mod.parse_aion(Path('examples/sort_products.aion')))
+    golden = Path('tests/cli/golden/sort_products.mlir').read_text(encoding='utf-8')
+    assert _normalize(ir) == _normalize(golden)

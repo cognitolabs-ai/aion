@@ -1,0 +1,12 @@
+#intent
+# goal: "Sum only non-null values"
+# pre: "data == Array[Int32?]"
+# post: "return == Int32"
+fn sum_non_null(data:Array[Int32?])->Int32{
+  data|filter(it != null)|fold(0, acc + it)
+}
+
+verify{
+  assert sum_non_null([1, null, 2]) == 3
+}
+

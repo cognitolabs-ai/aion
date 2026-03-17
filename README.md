@@ -51,6 +51,12 @@ Quickstart Wrapper
 - One command to scaffold with recommended flags:
   - `python scripts/aion_quickstart.py --name demo --template service --assistant claude`
 
+## Developer Tools
+- Formatter: `python scripts/aion_format.py <files> --write` (see `docs/formatter.md`).
+- LSP (MVP): `tools/aion_lsp.py` over stdio (see `docs/lsp.md`).
+- FQL/VCs: `docs/intent-fql.md` (interpreter checks simple postconditions during verify).
+- English stdlib summary: `docs/stdlib.en.md`.
+
 ## Environment Doctor
 - Run quick checks for tools, packages, and a project’s verify:
   - Global: `python scripts/aion_doctor.py`
