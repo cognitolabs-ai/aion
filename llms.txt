@@ -1,0 +1,29 @@
+# Aion Programming Language
+
+> Aion is the world's first AI-native programming language designed specifically for Large Language Models and agentic workflows. It features a Minimally Tokenized Syntax, Gradual Verification via a Formal Query Language (FQL), AST-First Contextualization, and hardware-agnostic autotuning via an MLIR backend.
+
+## Core Documentation
+- [Aion Philosophy and Architecture](/docs/architecture.md)
+- [Memory Management](/docs/memory.md)
+- [Standard Library](/docs/stdlib.md)
+
+# Aion Programming Language
+
+> Aion is the world's first AI-native programming language designed specifically for Large Language Models and agentic workflows. It features a Minimally Tokenized Syntax, Gradual Verification via a Formal Query Language (FQL), AST-First Contextualization, and hardware-agnostic autotuning via an MLIR backend.
+
+## Core Documentation
+- [Aion Philosophy and Architecture](/docs/architecture.md): Core design pillars, pipeline orchestration, and transition from human-centric to AI-native coding.
+- [Formal Syntax Specification](/docs/syntax.md): Complete ISO/IEC 14977 EBNF grammar optimized for token efficiency (no visual whitespace formatting).
+- [Formal Semantics](/docs/semantics.md): Axiomatic semantics for the `#intent` block verification and Structural Operational Semantics (SOS) for LLVM IR lowering.
+- [Environment Setup](/docs/getting-started.md): Installing the Aion compiler, configuring LLM API keys, and setting up the VS Code dual-syntax extension.
+
+## Language Reference
+- [Intent-Based Programming](/docs/intent.md): How to use mandatory `#intent` blocks and non-computable specifications.
+- [Memory Management](/docs/memory.md): AI-guided ownership, gradual verification, and sandboxed garbage collection fallbacks.
+- [Type System](/docs/types.md): Predictive strong typing using the `infer` keyword and struct-based MLIR lowering.
+- [Validation and Error Handling](/docs/validation.md): Implementing native validation loops, strict null safety, and `verify` blocks.
+
+## Optional
+- [Standard Library](/docs/stdlib.md): Built-in arrays, primitives, and external HTTP modules.
+- [Interoperability](/docs/interop.md): Zero-copy Python integration and C++ MLIR linking.
+- [Code Examples](/docs/examples.md): Side-by-side comparisons of Aion vs. Python and Rust for typical AI orchestration tasks.

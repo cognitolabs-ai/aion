@@ -1,0 +1,341 @@
+---
+doc-id: aion-http-module-v1
+title: Tehnična specifikacija modula `http`
+purpose: API definicije, tipi in pravila za varno izvajanje omrežnih zahtev v Aionu.
+tags: stdlib, http, network, async, match, mock
+last-updated: 2026-03-17
+---
+
+# Modul `http` v standardni knjižnici Aion
+
+**Bottom Line Up Front (BLUF):** Modul `http` v jeziku Aion omogoča asinhrono izvajanje omrežnih zahtev s pomočjo deklarativnih cevovodov (`|`). Zaradi nepredvidljive narave omrežnih klicev modul na ravni prevajalnika zahteva strogo strukturirano ujemanje stanj (`match`), s čimer umetno inteligenco (LLM) prisili k eksplicitnemu obravnavanju vseh možnih izidov (npr. HTTP statusov 404 in 500), kar preprečuje uhajanje neobravnavanih izjem [1].
+
+## 1. Podatkovne strukture (Structs)
+
+Modul `http` deluje z vnaprej določenimi, strojno optimiziranimi strukturami. Umetna inteligenca pri klicih znotraj prototipiranja običajno uporablja tip `infer`, ki ga zaledje MLIR samodejno razreši [2].
+
+### 1.1 `Response`
+Struktura, ki jo vrne vsak HTTP klic.
+- `status: Int32`: HTTP statusna koda (npr. 200, 404, 500).
+- `body: String`: Surovo besedilo odgovora.
+- `headers: Map[String, String]`: Slovar prejetih HTTP glav.
+- **Metode:**
+  - `json(self) -> infer?`: Poskusi razčleniti `body` kot JSON. Vrne opcijski (nullable) tip `infer?`, ki prevzame tip glede na kontekst leve strani enačbe. Če razčlenjevanje ne uspe, vrne `null`.
+  - `text(self) -> String`: Vrne surovo besedilo (enako kot `body`).
+
+### 1.2 `RequestOptions`
+Struktura za podajanje dodatnih parametrov zahtevku.
+- `headers: Map[String, String]?`: Opcijske glave zahtevka (npr. `{"Authorization": "Bearer token"}`).
+- `body: infer?`: Telo zahtevka (lahko je surovi `String` ali JSON struktura).
+- `timeout: Int32?`: Časovna omejitev v milisekundah (privzeto 5000).
+
+## 2. Metode modula
+
+Vse metode se izvajajo asinhrono. Ker Aion abstrahira zapleteno večnitnost preko cevovodov (pipeline orchestration) [3], LLM agentu ni treba generirati in upravljati ključnih besed, kot so `async/await` ali `Thread::spawn`.
+
+- `http.get(url: String, options: RequestOptions? = null) -> Response`
+- `http.post(url: String, options: RequestOptions? = null) -> Response`
+- `http.put(url: String, options: RequestOptions? = null) -> Response`
+- `http.delete(url: String, options: RequestOptions? = null) -> Response`
+
+*(Agent Note: Pri podajanju opcij v klicu lahko ustvarite anonimno strukturo: `http.post(url, {body: my_data})`)*.
+
+## 3. Varnost in obravnava napak (Exhaustive Pattern Matching)
+
+AI modeli v tradicionalnih jezikih (npr. Python) pogosto napačno predpostavijo, da bo omrežni klic vedno vrnil veljaven odgovor, kar vodi do pogostih `AttributeError` in `TypeError` zrušitev [4]. 
+
+Aion ta problem rešuje arhitekturno. Kadar koda izvede `http.get`, mora rezultat **obvezno** preiti skozi `match` blok. Prevajalnik pri tem zahteva popolno pokritost vseh mogočih stanj. Če LLM ne definira obravnave za primere napak ali ne uporabi rezervnega ("catch-all") pogoja `_ =>`, koda ne bo prevedena [1].
+
+## 4. Nativna validacija z `mock` ukazi
+
+Ker Aion vključuje t. i. "vericoding" proces [5], kjer se izvajalna logika preverja že v času kompilacije, zunanji API klici znotraj izoliranega preizkusnega okolja (sandboxa) nimajo dostopa do zunanjega interneta. Zato modul `http` integrira domorodno podporo za nadomeščanje klicev (mocking) neposredno v `verify` bloku [1, 6].
+
+## 5. Primer: Implementacija API klica s specifikacijo `http.post`
+
+Spodnji primer prikazuje, kako AI agent s pomočjo Aionove sintakse zgradi, opiše in matematično preveri proces ustvarjanja novega uporabnika na oddaljenem strežniku.
+
+```aion
+#intent
+# goal: "Pošlji uporabniške podatke na API. Vrni generiran ID. Če pride do napake pri validaciji (400), vrni null."
+# pre: "payload == UserStruct"
+# post: "return == String? AND handles 201, 400 and general server errors explicitly"
+fn create_remote_user(payload:UserStruct)->String?{
+    
+    // Klic se izvede in pretaka (pipe) v obravnavo izidov [3]
+    http.post("/api/v1/users", {body: payload})|match{
+        201 => ?.json().user_id as String,
+        400 => null, 
+        _   => throw APIError("Unexpected network or server error")
+    }
+
+    // Nativna validacija - enotni testi znotraj definicije funkcije [5]
+    verify{
+        // Priprava izoliranega okolja (mock) za simulacijo omrežja [1]
+        mock http.post("/api/v1/users", *) => Response(201, '{"user_id": "usr_99X"}')
+        mock http.post("/api/v1/users", {body: null}) => Response(400, '{"error": "bad request"}')
+        mock http.post("/api/v1/users", *) => Response(500, '')
+
+        let valid_user = UserStruct(name: "Ada")
+        
+        // Testiranje uspešnega klica
+        assert create_remote_user(valid_user) == "usr_99X"
+        
+        // Testiranje varnega ravnanja z Null tipi ob napaki [1, 7]
+        assert create_remote_user(null) == null
+        
+        // Preverjanje padca ob nedefiniranem izidu
+        assert_throws(APIError){ create_remote_user(valid_user) }
+    }
+}
+Kako koda izpolnjuje Aionove standarde:
+Brez vizualnega balasta (Minimally Tokenized Syntax): Za prehajanje med funkcijami se uporabljajo deterministični, gosti operatorji (|, ?., =>), presledki in nove vrstice niso del gramatike prevajalnika
+.
+Odkrivanje napak vnaprej: Povratni tip funkcije je strogo preverjen kot opcijski String?. Ker preverjanje poteka v izoliranem modulu v času kompilacije, LLM ne more generirati rešitve, ki bi sistemu povzročila nepredvidene poškodbe ob prekinitvi povezave.
+
+
+
+--------------------------------------------------------------------------------
+---
+doc-id: aion-stdlib-v1
+title: Aion Standard Library Reference
+purpose: API definitions, type signatures, and usage examples for Aion core modules.
+tags: stdlib, core, http, array, string, pipeline
+last-updated: 2026-03-17
+---
+
+# Aion Standard Library (StdLib)
+
+**Bottom Line Up Front (BLUF):** This document defines the core types (`Array`, `String`), declarative pipeline operators (`map`, `filter`), and the `http` module for the Aion programming language. All examples utilize Aion's Minimally Tokenized Syntax, mandatory `#intent` blocks, and `verify` validation loops.
+
+## 1. Core Data Types
+
+### 1.1 `Array[T]`
+Aion arrays are strongly typed, dynamically sized contiguous memory buffers. Under the hood, they are lowered to MLIR `linalg` dialects for hardware-agnostic vectorized operations.
+
+**Signatures:**
+- `len(self) -> Int32`: Returns the number of elements in the array.
+- `push(self, item: T) -> Void`: Appends an item to the end.
+- `pop(self) -> T?`: Removes and returns the last item. Returns `null` if empty.
+
+**AI Agent Usage Note:** Always handle the `null` case when calling `pop()` due to Aion's strict null safety.
+
+### 1.2 `String`
+UTF-8 encoded text sequences. Strings in Aion are immutable.
+
+**Signatures:**
+- `contains(self, substring: String) -> Bool`: Checks if the substring exists.
+- `split(self, delimiter: String) -> Array[String]`: Splits the string by the given delimiter.
+- `replace(self, old: String, new: String) -> String`: Returns a new string with replacements.
+
+## 2. Declarative Pipeline Operators
+
+Aion relies on declarative pipelines (`|`) instead of imperative loops to process data collections. These operators automatically support asynchronous execution and are evaluated lazily.
+
+### 2.1 `map(transform: Fn(T) -> U)`
+Transforms each element in an `Array[T]` into type `U`.
+
+### 2.2 `filter(predicate: Fn(T) -> Bool)`
+Returns a new `Array[T]` containing only elements where the predicate returns `true`.
+
+**Example: Processing an Array**
+```aion
+#intent
+# goal: "Filter even numbers and multiply them by 10."
+# pre: "numbers == Array[Int32]"
+# post: "return == Array[Int32] where all elements are multiples of 20"
+fn process_numbers(numbers:Array[Int32])->Array[Int32]{
+    numbers|filter(?.%2==0)|map(?.*10)
+}
+(Agent Note: ?. is the implicit pipeline element accessor).
+3. Network Module: http
+The http module provides safe, asynchronous network requests. Because network calls are inherently unpredictable, Aion enforces strict pattern matching on HTTP responses.
+3.1 http.get(url: String) -> Response
+Performs an asynchronous HTTP GET request.
+Struct Response:
+status: Int32: The HTTP status code.
+body: String: The raw response body.
+json(self) -> infer?: Parses the body as JSON. Returns an unresolved type (infer) that the compiler autotunes based on the left-hand assignment. Returns null if parsing fails.
+Example: Safe API Consumption
+#intent
+# goal: "Fetch data from an API. Return the parsed struct or null if not found (404)."
+# pre: "url == String"
+# post: "return == DataStruct? AND all HTTP errors are handled"
+fn fetch_secure_data(url:String)->DataStruct?{
+    
+    let res = http.get(url)
+    
+    res|match{
+        200=>?.json() as DataStruct,
+        404=>null,
+        _=>throw NetworkError("API Failure")
+    }
+
+    verify{
+        mock http.get("test.com/ok") => Response(200, '{"id": 1}')
+        mock http.get("test.com/fail") => Response(404, '')
+        assert fetch_secure_data("test.com/ok") != null
+        assert fetch_secure_data("test.com/fail") == null
+    }
+}
+
+### Analiza strukture na podlagi virov:
+1. **Oznake in klasifikacija (YAML Frontmatter):** Blok na začetku dokumenta zagotavlja eksplicitne metapodatke (`doc-id`, `tags`, `purpose`), kar je po standardih MAGI (Markdown for Agent Guidance & Instruction) ključno za agentne sisteme in izboljšano RAG iskanje [5, 6].
+2. **Kompaktnost (Markdown):** Celoten API je zapisan v Markdownu, ki je za modele najbolj optimalen, saj je sintaktično lahek in preprečuje izgubo žetonov v primerjavi s formatom HTML ali PDF [11-13].
+3. **Pomen primerov:** Vključeni so strukturirani primeri kode s FQL preverjanjem (`#intent`) in enotnimi testi (`verify`). Raziskave na področju RAG sistemov priporočajo, da dokumentacija API-jev vsebuje predvsem raznolike primere uporabe, saj to preprečuje, da bi LLM napačno sklepal o delovanju knjižnic [1, 2, 8].
+4. **Agent Notes (Opombe za agente):** Besedilo vključuje opozorila, ustvarjena neposredno za model (npr. opozorilo o nujnosti obravnavanja `null` pri odstranjevanju iz polja), s čimer model ob branju dokumentacije takoj asimilira varnostna pravila jezika Aion in preprečuje napake `NullReferenceException`, ki so pogoste v dinamičnih jezikih [14-16].
+
+# Aion Programming Language - Full Documentation
+
+> Aion is the world's first AI-native programming language designed specifically for Large Language Models and agentic workflows. It features a Minimally Tokenized Syntax, Gradual Verification via a Formal Query Language (FQL), AST-First Contextualization, and hardware-agnostic autotuning via an MLIR backend.
+> This file contains the complete, flattened technical documentation for the Aion language, designed for full context window ingestion by LLMs.
+
+---
+
+## 1. Philosophy and Architecture
+
+**The Paradigm Shift:** Aion transitions software engineering from a "Human-Readable Era" to an "AI-Generative Era." Legacy languages (Python, Rust) prioritize visual hierarchies and mnemonic readability, which consume valuable context window budgets and compute on structurally meaningless characters. Aion replaces human-centric visual syntax with a Minimally Tokenized Syntax, reducing token overhead by up to 24.5%.
+
+### Core Architectural Pillars:
+- **Frontend (AST & Repository Map):** Parses AI-oriented grammar directly into Abstract Syntax Trees (AST). The compiler natively maintains a structural map of the entire codebase, giving the LLM global context of dependencies.
+- **Intent-Based Semantics (FQL):** Aion enforces the use of a Formal Query Language (FQL) via mandatory `#intent` blocks. The compiler uses gradual verification to mathematically prove that the generated AST matches the FQL intent.
+- **Backend (MLIR):** The AST is lowered into a Multi-Level Intermediate Representation (MLIR). This provides hardware-agnostic autotuning, offloading all low-level micro-optimizations (e.g., CUDA memory management) to the compiler.
+- **Declarative Pipeline Orchestration:** Aion uses a "pipe-first" architecture using the `|` operator. Data flows strictly from left to right, automatically supporting asynchronous and parallel execution.
+
+---
+
+## 2. Memory Management and Typing
+
+Aion ensures memory safety without the cognitive load of Rust's borrow checker. It introduces **AI-Guided Ownership** utilizing gradual verification.
+
+- **Gradual Verification:** Basic ownership rules apply. When the compiler cannot mathematically prove a complex lifetime is valid (a "Not Sure" state), it delegates a prompt back to the LLM, asking for an explicit semantic proof in the `#intent` block. If the LLM cannot satisfy the theorem prover, the compiler dynamically wraps the specific memory boundary in a deterministic garbage-collected sandbox.
+- **Predictive Strong Typing:** 
+  - *Drafting Phase:* The LLM can use the `infer` keyword for rapid prototyping.
+  - *Compilation Phase:* The MLIR backend automatically resolves all `infer` placeholders into strict, hardware-optimized structs (e.g., `Int32`, `Float64`) during whole-program analysis.
+- **Strict Null Safety:** Variables cannot be `null` unless explicitly marked nullable (e.g., `String?`). Unhandled nulls are rejected at compile time.
+
+---
+
+## 3. Core Syntax and Intentional Programming
+
+Aion discards formatting spaces and newlines. Variable declarations use `let` (mutable) and `const` (immutable).
+
+### The `#intent` Block
+Every function must begin with a mandatory `#intent` block. The AI must describe its logic, expected inputs, and desired outcomes. If the executable code diverges from the constraints defined in the `#intent` block, the Aion compiler flags a semantic mismatch.
+
+### Example: Data Filter Pipeline
+```aion
+#intent
+# goal: "Filter a list of product records to find active items under a maximum price."
+# pre: "data == Array[ProductStruct], max_price == Float64"
+# post: "return == Array[ProductStruct] where ?.is_active == true AND ?.price <= max_price"
+fn filter_active_products(data:Array[ProductStruct],max_price:Float64)->Array[ProductStruct]{
+    data|filter(?.is_active==true)|filter(?.price<=max_price)
+}
+
+--------------------------------------------------------------------------------
+4. Validation and Error Handling
+Aion integrates unit testing directly into the function definition using the verify keyword.
+Native Validation Loops
+The AI agent writes the #intent block.
+The AI writes the declarative execution logic.
+The AI writes the verify block containing concrete unit tests.
+During compilation, Aion executes the verify block within an isolated, ephemeral sandbox.
+If it fails, the compiler captures the runtime control-flow trace and feeds it back to the LLM for autonomous self-correction.
+Example: Explicit API Error Handling
+#intent
+# goal: "Fetch user profile data. If 404, return null safely."
+# pre: "user_id == String"
+# post: "return == UserProfile?"
+fn fetch_user_profile(user_id:String)->UserProfile?{
+    http.get("/api/users/${user_id}")|match{
+        200=>?.json() as UserProfile,
+        404=>null, 
+        _=>throw APIError("Unexpected status")
+    }
+    verify{
+        mock http.get("/api/users/valid") => Response(200, "{...}")
+        mock http.get("/api/users/missing") => Response(404)
+        assert fetch_user_profile("valid") != null
+        assert fetch_user_profile("missing") == null
+    }
+}
+
+--------------------------------------------------------------------------------
+5. Formal Syntax Specification (EBNF ISO/IEC 14977)
+Aion's grammar explicitly omits Whitespace, Indent, and Newline tokens to minimize tokenization fertility.
+program = { declaration } ;
+declaration = constant_decl | variable_decl | function_decl ;
+type_name = "Int32" | "Float64" | "String" | "Bool" | "UserProfile" | "infer" | identifier ;
+array_type = "Array", "[", type_name, "]" ;
+base_type = type_name | array_type ;
+type = base_type, [ "?" ] ; 
+constant_decl = "const", identifier, ":", type, "=", expression ;
+variable_decl = "let", identifier, ":", type, "=", expression ;
+intent_block = "#intent", { intent_directive } ;
+intent_directive = "#", ( "goal:" | "pre:" | "post:" | "proof:" ), string_literal ;
+function_decl = intent_block, "fn", identifier, "(", [ parameter_list ], ")", "->", type, "{", execution_body, [ verify_block ], "}" ;
+parameter_list = parameter, { ",", parameter } ;
+parameter = identifier, ":", type ;
+execution_body = { variable_decl }, pipeline_expr ;
+pipeline_expr = expression, { "|", pipe_operation } ;
+pipe_operation = function_call | match_block | method_chain ;
+match_block = "match", "{", { match_case }, "}" ;
+match_case = ( expression | "_" ), "=>", expression, "," ;
+verify_block = "verify", "{", { verify_stmt }, "}" ;
+verify_stmt = mock_stmt | assert_stmt ;
+mock_stmt = "mock", function_call, "=>", expression ;
+assert_stmt = "assert", expression | "assert_throws", "(", identifier, ")", "{", function_call, "}" ;
+expression = identifier | literal | function_call | method_chain | binary_expr ;
+function_call = identifier, "(", [ argument_list ], ")" ;
+method_chain = "?.", identifier, [ "(", [ argument_list ], ")" ] ;
+argument_list = expression, { ",", expression } ;
+binary_expr = expression, operator, expression ;
+identifier = letter, { letter | digit | "_" } ;
+literal = string_literal | numeric_literal | "null" | "true" | "false" ;
+operator = "==" | "!=" | "<" | "<=" | ">" | ">=" | "+" | "-" | "*" | "/" ;
+
+--------------------------------------------------------------------------------
+6. Formal Semantics
+Axiomatic Semantics for Intent Verification
+Used to check compliance between FQL specifications and AST logic using Hoare triples {P} S {Q}: ∀x. P(x) => P^(x), ∀x,y. P(x) ∧ Q^(x,y) => Q(x,y) / valid_intent(f)
+Operational Semantics (SOS) for LLVM IR Lowering
+Predictive Strong Typing: Γ ⊢ e : T, T ≠ infer / Γ ⊢ let x : infer = e => LLVM_IR: %x = alloca T; store T e, ptr %x
+Pipeline Orchestration: Γ ⊢ e ⇓ %v_1, Γ ⊢ f(%v_1) ⇓ %v_2 / Γ ⊢ e | f => %v_2
+Null Safety Branching: Γ ⊢ e : T?, T? is nullable / Γ ⊢ match e { null => e_1, x => e_2 } => LLVM_IR: br_on_null e, label_null, label_val
+
+--------------------------------------------------------------------------------
+7. MLIR Aion High-Level Dialect (TableGen Spec)
+The AionHL dialect bridges AST abstractions and machine code.
+def Aion_Dialect : Dialect {
+  let name = "aion";
+  let summary = "Aion High-Level Dialect for AI-native code generation.";
+  let cppNamespace = "::mlir::aion";
+}
+
+def Aion_IntentOp : Op<Aion_Dialect, "intent", [IsolatedFromAbove]> {
+  let arguments = (ins StringAttr:$goal, StringAttr:$precondition, StringAttr:$postcondition);
+}
+
+def Aion_PipeOp : Op<Aion_Dialect, "pipe", [NoSideEffect]> {
+  let arguments = (ins AnyType:$input_val, SymbolRefAttr:$target_func);
+  let results = (outs AnyType:$output_val);
+  let assemblyFormat = "$input_val `|` $target_func attr-dict `:` type($input_val) `->` type($output_val)";
+}
+
+def Aion_InferCastOp : Op<Aion_Dialect, "infer_cast", [DeclareOpInterfaceMethods<CastOpInterface>]> {
+  let arguments = (ins AnyType:$input);
+  let results = (outs AnyType:$resolved_type);
+}
+
+def Aion_MatchNullOp : Op<Aion_Dialect, "match_null", [Terminator]> {
+  let arguments = (ins AnyType:$target);
+  let successors = (successor AnySuccessor:$null_block, AnySuccessor:$val_block);
+}
+
+--------------------------------------------------------------------------------
+8. Environment Setup (Ubuntu / VS Code)
+Install Compiler & Backend: Install the LLVM/MLIR-backed Aion compiler via terminal.
+LLM API Configuration: Create a .env file with OPENAI_API_KEY or ANTHROPIC_API_KEY to allow the compiler to perform gradual verification.
+IDE Integration (DualCode Extension): Install the Aion VS Code extension. Because Aion code lacks visual whitespace formatting to save tokens, the extension provides a bidirectional translator: it renders the code visually readable for humans while passing the raw, dense token stream to the LLM and compiler.
+Sandboxing: Install Docker to provide the ephemeral execution environment for verify blocks.
+AST Daemon: Run the Aion project initializer to start the background AST repository map service for multi-file context tracking.
